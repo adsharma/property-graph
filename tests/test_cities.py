@@ -18,10 +18,15 @@ init_edge_types()
 @pytest.mark.asyncio
 async def test_cities():
     capitals = {
-        "France": "Paris",
-        "USA": "Washington DC",
-        "India": "New Delhi",
-        "China": "Beijing",
-        "Russia": "Moscow",
+        "France": ("Paris", {"since": 1950}),
+        "USA": ("Washington DC", {"since": 1960}),
+        "India": ("New Delhi", {"since": 1970}),
+        "China": ("Beijing", {"since": 1980}),
+        "Russia": ("Moscow", {"since": 1990}),
     }
-    await save_graph(capitals.items(), Country, City, CapitalRelation)
+
+    def unpack(row):
+        for k, v in row:
+            yield k, v[0], v[1]
+
+    await save_graph(list(unpack(capitals.items())), Country, City, CapitalRelation)

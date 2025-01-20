@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import date
 from typing import Dict, List
 
@@ -59,6 +59,9 @@ class GraphBase:
         self.create_object_type_relation(self.__class__)
 
 
+GRAPH_BASE_FIELDS = {f.name for f in fields(GraphBase)}
+
+
 @dataclass(kw_only=True)
 class PropertyBase:
     rtype: int = field(default=0)
@@ -90,6 +93,9 @@ class PropertyBase:
         self.rtype = self.TYPE.id
 
 
+PROPERTY_BASE_FIELDS = {f.name for f in fields(PropertyBase)}
+
+
 def inject_base(cls):
     extras = {"__post_init__": GraphBase.__post_init__}
     cls = type(cls.__name__, (GraphBase,), {**cls.__dict__, **extras})
@@ -104,11 +110,11 @@ def inject_property_base(cls):
 
 
 def graph(cls):
-    return inject_base(cls)
+    return dataclass(inject_base(cls))
 
 
 def property(cls):
-    return inject_property_base(cls)
+    return dataclass(inject_property_base(cls))
 
 
 INFINITY_DATE = date.max
@@ -133,23 +139,32 @@ async def save_graph(
     ids = allocate_ids(2 * len(rows))
 
     with Database().db as session:
-        for left, right, *_ in rows:
-            left_obj = left_model().sqlmodel()
-            right_obj = right_model().sqlmodel()
-            # Consider setting a strongly typed field and then serializing to the property dict in the future.
-            left_obj.properties["name"] = left
-            right_obj.properties["name"] = right
+        for left, right, props, *_ in rows:
+            left_obj = left_model(left)
+            right_obj = right_model(right)
+            left_obj.properties = {
+                k: v for k, v in asdict(left_obj).items() if k not in GRAPH_BASE_FIELDS
+            }
+            right_obj.properties = {
+                k: v for k, v in asdict(right_obj).items() if k not in GRAPH_BASE_FIELDS
+            }
+            left_obj = left_obj.sqlmodel()
+            right_obj = right_obj.sqlmodel()
             left_obj.id = ids.pop(0)
             right_obj.id = ids.pop(0)
             session.add(left_obj)
             session.add(right_obj)
-            typed_relation = relation_class()
+            typed_relation = relation_class(**props)
             relation = Relation(
                 src=left_obj.id,
                 rtype=typed_relation.TYPE.id,
                 dst=right_obj.id,
+                properties={
+                    k: v
+                    for k, v in asdict(typed_relation).items()
+                    if k not in PROPERTY_BASE_FIELDS
+                },
             )
-            relation.properties["since"] = typed_relation.since
             session.add(relation.sqlmodel())
         session.commit()
     return len(rows)
